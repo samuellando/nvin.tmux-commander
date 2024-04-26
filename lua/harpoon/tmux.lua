@@ -20,7 +20,7 @@ if global_config.tmux_autoclose_windows then
     })
 end
 
-local function create_terminal()
+local function create_terminal(name)
     log.trace("tmux: _create_terminal())")
 
     local window_id
@@ -30,6 +30,9 @@ local function create_terminal()
         "tmux",
         "new-window",
         "-P",
+        "-d",
+        "-n",
+        name,
         "-F",
         "#{pane_id}",
     }, vim.loop.cwd())
@@ -55,12 +58,14 @@ local function terminal_exists(window_id)
     local window_list, _, _ = utils.get_os_command_output({
         "tmux",
         "list-windows",
+        "-F",
+        "#W"
     }, vim.loop.cwd())
 
     -- This has to be done this way because tmux has-session does not give
     -- updated results
     for _, line in pairs(window_list) do
-        local window_info = utils.split_string(line, "@")[2]
+        local window_info = line
 
         if string.find(window_info, string.sub(window_id, 2)) then
             exists = true
@@ -70,6 +75,28 @@ local function terminal_exists(window_id)
     return exists
 end
 
+local function get_window_id(window_id)
+    log.trace("_get_window_id(): Window:", window_id)
+
+    local window_list, _, _ = utils.get_os_command_output({
+        "tmux",
+        "list-windows",
+        "-F",
+        "#S:#W"
+    }, vim.loop.cwd())
+
+    -- This has to be done this way because tmux has-session does not give
+    -- updated results
+    for _, line in pairs(window_list) do
+        local window_info = line
+
+        if string.find(window_info, string.sub(window_id, 2)) then
+            return window_info
+        end
+    end
+    log.error("Window does not exist")
+end
+
 local function find_terminal(args)
     log.trace("tmux: _find_terminal(): Window:", args)
 
@@ -77,38 +104,10 @@ local function find_terminal(args)
         -- assume args is a valid tmux target identifier
         -- if invalid, the error returned by tmux will be thrown
         return {
-            window_id = args,
-            pane = true,
+            window_id = get_window_id(args),
+            pane = false,
         }
     end
-
-    if type(args) == "number" then
-        args = { idx = args }
-    end
-
-    local window_handle = tmux_windows[args.idx]
-    local window_exists
-
-    if window_handle then
-        window_exists = terminal_exists(window_handle.window_id)
-    end
-
-    if not window_handle or not window_exists then
-        local window_id = create_terminal()
-
-        if window_id == nil then
-            error("Failed to find and create tmux window.")
-            return
-        end
-
-        window_handle = {
-            window_id = "%" .. window_id,
-        }
-
-        tmux_windows[args.idx] = window_handle
-    end
-
-    return window_handle
 end
 
 local function get_first_empty_slot()
@@ -149,6 +148,8 @@ function M.sendCommand(idx, cmd, ...)
         cmd = cmd .. "\n"
     end
 
+    log.error("ID", window_handle.window_id)
+
     if cmd then
         log.debug("sendCommand:", cmd)
 
@@ -156,7 +157,7 @@ function M.sendCommand(idx, cmd, ...)
             "tmux",
             "send-keys",
             "-t",
-            window_handle.window_id,
+            window_handle.window_id..".",
             string.format(cmd, ...),
         }, vim.loop.cwd())
 
@@ -227,6 +228,16 @@ function M.set_cmd_list(new_list)
         harpoon.get_term_config().cmds[k] = v
     end
     M.emit_changed()
+end
+
+function M.create_terminal(name)
+    log.trace("create_terminal()", name)
+    if not terminal_exists(name) then
+        create_terminal(name)
+        return true
+    end
+    M.emit_changed()
+    return false
 end
 
 return M
