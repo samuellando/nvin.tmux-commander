@@ -1,8 +1,7 @@
 local log = require("commander.dev").log
-local utils = require("harpoon.utils")
+local utils = require("commander.utils")
 
 local M = {}
-local tmux_windows = {}
 
 local function create_terminal(name)
     log.trace("tmux: _create_terminal())")
